@@ -1,56 +1,45 @@
-# Alzikrayat — MERN Photo Sharing App
+# Alzikrayat2 Extension (Project 4)
 
-Full-stack photo sharing application built for the *Advanced Web Technologies* course (Project 3).
-Users can register, log in, upload photos, browse a gallery, and comment on photos.
+**Selected track: D — Real-Time WebSocket (Socket.io)**
 
-**Author:** Khalid Mohammed Saleh Khalid — Student ID: 202011276367
+Author: Khalid Mohammed Saleh Khalid — Student ID: 202011276367
 
-## Features
-- Register / login with bcrypt-hashed passwords and JWT authentication
-- Public gallery and photo detail pages
-- Photo upload (multer), display, and deletion (only by the photo's owner)
-- Comments on photos
-- Server-side validation (Joi) and consistent JSON error responses
-- Responsive UI
+This repository extends the Alzikrayat MERN photo-sharing app (Project 3) with real-time features built on Socket.io. All Project 3 features (register/login, upload, gallery, detail page, owner-only delete, comments) still work as before.
+
+## Track and rationale
+Alzikrayat is a social application: people look at the same photos and comment on them. Without real-time updates, a user must refresh the page to see new comments or photos. Socket.io (WebSocket) fixes this and demonstrates event-driven communication, rooms, and client cleanup.
+
+## What was added
+- Socket.io server attached to the Express HTTP server (`server/socket.js`).
+- **Live comments:** a new comment appears instantly for every user viewing the same photo.
+- **Room per photo:** each photo detail page joins the room `photo:<photoId>`, so comments reach only the people viewing that photo.
+- **Live gallery (optional feature):** a new photo appears instantly in every open gallery, with a notification, and a deleted photo disappears.
+- React connection through `useEffect`, with cleanup on unmount.
+- "Live" badge on the comments section when the socket is connected.
+
+## Socket events
+| Event | Direction | Payload | Description |
+|---|---|---|---|
+| `photo:join` | client → server | photoId | Join the room of the photo being viewed |
+| `photo:leave` | client → server | photoId | Leave that room |
+| `comment:new` | server → room `photo:<id>` | comment (with author name) | Sent after a comment is saved |
+| `photo:new` | server → all clients | photo (with owner name) | Sent after a photo is uploaded |
+| `photo:deleted` | server → all clients | photoId | Sent after the owner deletes a photo |
+
+## Design decisions
+- **Writes stay on the protected REST API.** Comments and photos are created and deleted through the existing endpoints (JWT middleware, Joi validation, ownership check). The server broadcasts the result only **after** saving it. Clients cannot send comments through the socket, so authentication and validation cannot be bypassed.
+- **Duplicate protection.** The author receives their own item from the REST response and from the socket event, so the client ignores items whose `_id` is already in the list.
+- **Reconnection.** The client rejoins the photo room on every `connect` event, because rooms are lost when a connection drops.
+- **Cleanup.** On unmount the client leaves the room, removes its listeners with `socket.off`, and disconnects.
 
 ## Tech stack
-- **Frontend:** React, Vite, React Router, Axios
-- **Backend:** Node.js, Express, Mongoose, multer, Joi, bcryptjs, jsonwebtoken
-- **Database:** MongoDB Atlas
-
-## Project structure
-```
-Alzikrayat/
-├── client/                 # React + Vite app
-│   ├── src/
-│   │   ├── components/     # Navbar, PhotoCard, CommentForm, ProtectedRoute
-│   │   ├── pages/          # Home, Gallery, PhotoDetail, LoginRegister, NotFound
-│   │   ├── api.js          # Axios instance (adds JWT, handles expired sessions)
-│   │   ├── AuthContext.jsx # Login state shared across the app
-│   │   ├── App.jsx         # React Router configuration
-│   │   └── main.jsx
-│   └── vite.config.js      # Dev proxy to the Express API
-└── server/
-    ├── models/             # User.js, Photo.js, Comment.js
-    ├── routes/             # authRoutes.js, photoRoutes.js, commentRoutes.js
-    ├── controllers/        # authController.js, photoController.js, commentController.js
-    ├── middleware/         # auth.js, upload.js, validation.js, errorHandler.js
-    ├── uploads/            # Stored image files (git-ignored)
-    ├── .env.example
-    └── server.js
-```
+React, Vite, React Router, Axios, **socket.io-client** · Node.js, Express, Mongoose, **socket.io**, multer, Joi, bcryptjs, jsonwebtoken · MongoDB Atlas
 
 ## Prerequisites
 - Node.js 18 or newer
-- A free MongoDB Atlas cluster (https://www.mongodb.com/atlas)
+- A MongoDB Atlas cluster (free M0 tier is enough)
 
-## MongoDB Atlas setup
-1. Create a free (M0) cluster.
-2. **Database Access:** create a database user with a password (letters and numbers only).
-3. **Network Access:** add IP address `0.0.0.0/0` (allow access from anywhere) for development.
-4. **Connect → Drivers:** copy the connection string and add the database name `alzikrayat`.
-
-## Installation and running
+## Setup and run
 
 ### 1. Backend
 ```bash
@@ -58,51 +47,67 @@ cd server
 npm install
 cp .env.example .env      # Windows PowerShell: copy .env.example .env
 ```
-Edit `.env` and fill in your values, then start the API:
+Fill in `.env`, then start the server:
 ```bash
 npm run dev
 ```
-The API runs on http://localhost:5000 (health check: `/api/health`).
+The server (REST API and Socket.io) listens on http://localhost:5000.
 
 ### 2. Frontend
-Open a second terminal:
+In a second terminal:
 ```bash
 cd client
 npm install
 npm run dev
 ```
-Open http://localhost:5173. The Vite dev server proxies `/api` and `/uploads` to the Express server.
+Open http://localhost:5173. Vite proxies `/api`, `/uploads`, and `/socket.io` (with WebSocket support) to port 5000.
 
 ## Environment variables (`server/.env`)
 | Variable | Description |
 |---|---|
-| `PORT` | Port for the Express server (default 5000) |
-| `MONGODB_URI` | MongoDB Atlas connection string, including the `alzikrayat` database name |
+| `PORT` | Server port (default 5000) |
+| `MONGODB_URI` | MongoDB Atlas connection string including the database name |
 | `JWT_SECRET` | Long random string used to sign login tokens |
 
-The `.env` file is excluded from Git and must never be committed.
+`.env` is excluded from Git and must never be committed.
 
-## REST API
-| Method | Endpoint | Auth | Success | Errors |
-|---|---|---|---|---|
-| POST | `/api/auth/register` | — | 201 | 400 validation, 409 email exists |
-| POST | `/api/auth/login` | — | 200 | 400 validation, 401 wrong credentials |
-| GET | `/api/photos` | — | 200 | — |
-| GET | `/api/photos/:id` | — | 200 (photo + comments) | 400 bad id, 404 not found |
-| POST | `/api/photos` | Bearer token | 201 | 400 validation/file, 401 |
-| DELETE | `/api/photos/:id` | Bearer token (owner) | 200 | 400, 401, 403 not owner, 404 |
-| POST | `/api/photos/:id/comments` | Bearer token | 201 | 400, 401, 404 |
+## How to test the real-time features
+1. Open the app in two different browsers (or one normal window and one Incognito window).
+2. Register two users, one in each browser.
+3. **Live comments:** open the same photo in both browsers (the "● Live" badge appears), write a comment in one browser, and watch it appear instantly in the other without a refresh.
+4. **Rooms:** open a different photo in the second browser. Comments on the first photo must not appear there.
+5. **Live gallery:** keep `/gallery` open in both browsers, upload a photo in the first one, and see it appear in the second with a notification. Delete it and see it disappear.
 
-Protected requests send the header `Authorization: Bearer <token>`.
-Photo upload uses `multipart/form-data` with fields `title`, `description`, and `photo` (image, max 5 MB).
+## Project structure (new and changed files)
+server/
+├── socket.js # Socket.io setup: rooms and join/leave events
+├── server.js # HTTP server + Socket.io, io shared with controllers
+└── controllers/
+├── commentController.js # broadcasts comment:new to the photo room
+└── photoController.js # broadcasts photo:new and photo:deleted
+client/
+├── vite.config.js # proxy for /socket.io (ws: true)
+└── src/
+├── socket.js # shared socket.io-client instance
+└── pages/
+├── PhotoDetail.jsx # joins the photo room, listens for comment:new
+└── Gallery.jsx # listens for photo:new and photo:deleted
 
-## Data model
-- **User:** firstName, lastName, email (unique), password (bcrypt hash), optional bio/profilePicture
-- **Photo:** userId → User, fileName, title, description, dateTime
-- **Comment:** photoId → Photo, userId → User, comment, dateTime
+## REST API (unchanged from Project 3)
+| Method | Endpoint | Auth |
+|---|---|---|
+| POST | `/api/auth/register` | — |
+| POST | `/api/auth/login` | — |
+| GET | `/api/photos` | — |
+| GET | `/api/photos/:id` | — |
+| POST | `/api/photos` | Bearer token |
+| DELETE | `/api/photos/:id` | Bearer token (owner only) |
+| POST | `/api/photos/:id/comments` | Bearer token |
 
 ## Security notes
-- Passwords are hashed with bcrypt and never stored or returned in plain text.
-- Deleting a photo is allowed only for its owner (checked on the server, returns 403 otherwise).
-- Secrets live in `.env`, which is excluded from version control.
-- Uploads accept image files only, with a size limit.
+- Passwords are hashed with bcrypt; sessions use JWT; secrets live in `.env`.
+- Socket events cannot create, edit, or delete data. Only the validated REST API does.
+- Uploads accept images only, with a 5 MB limit.
+
+## Project 3
+The original Project 3 version is in the repository `Khalid-Mohammed3/alzikrayat`.
