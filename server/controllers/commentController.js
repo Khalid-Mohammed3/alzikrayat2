@@ -23,6 +23,12 @@ exports.create = async (req, res, next) => {
 
     const comment = await created.populate("userId", "firstName lastName");
 
+    // Real-time: tell everyone viewing this photo about the new comment
+    const io = req.app.get("io");
+    if (io) {
+      io.to(`photo:${id}`).emit("comment:new", JSON.parse(JSON.stringify(comment)));
+    }
+
     res.status(201).json({ success: true, comment });
   } catch (err) {
     next(err);
