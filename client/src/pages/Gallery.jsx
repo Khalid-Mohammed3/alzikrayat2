@@ -1,13 +1,19 @@
 import { useEffect, useRef, useState } from "react";
 import api from "../api";
+import socket from "../socket";
 import { useAuth } from "../AuthContext";
 import PhotoCard from "../components/PhotoCard";
+
+// Adds a photo to the list only if it is not already there (avoids duplicates)
+const withPhoto = (list, photo) =>
+  list.some((p) => p._id === photo._id) ? list : [photo, ...list];
 
 export default function Gallery() {
   const { user } = useAuth();
   const [photos, setPhotos] = useState([]);
   const [loading, setLoading] = useState(true);
   const [errors, setErrors] = useState([]);
+  const [notice, setNotice] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [file, setFile] = useState(null);
@@ -29,6 +35,29 @@ export default function Gallery() {
     loadPhotos();
   }, []);
 
+  // Real-time: new photos appear and deleted photos disappear for everyone
+  useEffect(() => {
+    const onNewPhoto = (photo) => {
+      setPhotos((prev) => withPhoto(prev, photo));
+      if (photo.userId?._id !== user?.id) {
+        setNotice(`New photo: "${photo.title}"`);
+        setTimeout(() => setNotice(""), 4000);
+      }
+    };
+    const onDeleted = (id) => setPhotos((prev) => prev.filter((p) => p._id !== id));
+
+    socket.on("photo:new", onNewPhoto);
+    socket.on("photo:deleted", onDeleted);
+    socket.connect();
+
+    // Cleanup when leaving the page
+    return () => {
+      socket.off("photo:new", onNewPhoto);
+      socket.off("photo:deleted", onDeleted);
+      socket.disconnect();
+    };
+  }, [user?.id]);
+
   const handleUpload = async (e) => {
     e.preventDefault();
     if (!file) {
@@ -45,12 +74,8 @@ export default function Gallery() {
 
     try {
       const { data } = await api.post("/photos", formData);
-      // The server returns only the owner id, so add the owner details for display
-      const newPhoto = {
-        ...data.photo,
-        userId: { _id: user.id, firstName: user.firstName, lastName: user.lastName },
-      };
-      setPhotos((prev) => [newPhoto, ...prev]);
+      // The socket event may arrive first; withPhoto ignores the duplicate
+      setPhotos((prev) => withPhoto(prev, data.photo));
       setTitle("");
       setDescription("");
       setFile(null);
@@ -76,6 +101,8 @@ export default function Gallery() {
   return (
     <section>
       <h1>Gallery</h1>
+
+      {notice && <p className="notice">{notice}</p>}
 
       {errors.length > 0 && (
         <ul className="alert">

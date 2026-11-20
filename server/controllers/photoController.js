@@ -50,12 +50,20 @@ exports.create = async (req, res, next) => {
       description: req.body.description,
     });
 
+    // Add the owner's name so every client can display the new photo right away
+    await photo.populate("userId", OWNER_FIELDS);
+
+    // Real-time: tell every connected client about the new photo
+    const io = req.app.get("io");
+    if (io) io.emit("photo:new", JSON.parse(JSON.stringify(photo)));
+
     res.status(201).json({ success: true, photo });
   } catch (err) {
     if (req.file) fs.unlink(req.file.path, () => {});
     next(err);
   }
 };
+
 
 exports.remove = async (req, res, next) => {
   try {
@@ -77,6 +85,10 @@ exports.remove = async (req, res, next) => {
     await Comment.deleteMany({ photoId: id });
     await photo.deleteOne();
     fs.unlink(path.join(__dirname, "..", "uploads", photo.fileName), () => {});
+
+    // Real-time: tell every connected client to remove the photo
+    const io = req.app.get("io");
+    if (io) io.emit("photo:deleted", id);
 
     res.status(200).json({ success: true, message: "Photo deleted" });
   } catch (err) {
